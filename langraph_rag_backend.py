@@ -21,6 +21,7 @@ import requests
 
 load_dotenv()
 
+
 # -------------------
 # 1. LLM + embeddings
 # -------------------

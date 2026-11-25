@@ -33,6 +33,25 @@ def load_conversation(thread_id):
     return state.values.get("messages", [])
 
 
+def content_to_text(content) -> str:
+    """Convert LangChain/Gemini message content into plain text.
+
+    Gemini can return content as a list of parts (with extra fields such as
+    'signature'); we keep only the text parts.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, str):
+                parts.append(part)
+            elif isinstance(part, dict) and part.get("type") == "text":
+                parts.append(part.get("text", ""))
+        return "".join(parts)
+    return ""
+
+
 # ======================= Session Initialization ===================
 if "message_history" not in st.session_state:
     st.session_state["message_history"] = []
@@ -98,14 +117,14 @@ st.title("Multi Utility Chatbot")
 # Chat area
 for message in st.session_state["message_history"]:
     with st.chat_message(message["role"]):
-        st.text(message["content"])
+        st.markdown(message["content"])
 
 user_input = st.chat_input("Ask about your document or use tools")
 
 if user_input:
     st.session_state["message_history"].append({"role": "user", "content": user_input})
     with st.chat_message("user"):
-        st.text(user_input)
+        st.markdown(user_input)
 
     CONFIG = {
         "configurable": {"thread_id": thread_key},
@@ -117,7 +136,7 @@ if user_input:
         status_holder = {"box": None}
 
         def ai_only_stream():
-            for message_chunk, _ in chatbot.stream(
+            for message_chunk, metadata in chatbot.stream(
                 {"messages": [HumanMessage(content=user_input)]},
                 config=CONFIG,
                 stream_mode="messages",
@@ -126,17 +145,23 @@ if user_input:
                     tool_name = getattr(message_chunk, "name", "tool")
                     if status_holder["box"] is None:
                         status_holder["box"] = st.status(
-                            f" Using `{tool_name}` …", expanded=True
+                            f"🔧 Using `{tool_name}` …", expanded=True
                         )
                     else:
                         status_holder["box"].update(
-                            label=f" Using `{tool_name}` …",
+                            label=f"🔧 Using `{tool_name}` …",
                             state="running",
                             expanded=True,
                         )
 
-                if isinstance(message_chunk, AIMessage):
-                    yield message_chunk.content
+                # Only show the LLM's final text (not tool-call or tool messages)
+                elif (
+                    isinstance(message_chunk, AIMessage)
+                    and metadata.get("langgraph_node") == "chat_node"
+                ):
+                    text = content_to_text(message_chunk.content)
+                    if text:  # skips the empty message that carries a tool call
+                        yield text
 
         ai_message = st.write_stream(ai_only_stream())
 
@@ -164,8 +189,15 @@ if selected_thread:
 
     temp_messages = []
     for msg in messages:
-        role = "user" if isinstance(msg, HumanMessage) else "assistant"
-        temp_messages.append({"role": role, "content": msg.content})
+        if isinstance(msg, HumanMessage):
+            role = "user"
+        elif isinstance(msg, AIMessage):
+            role = "assistant"
+        else:
+            continue  # skip tool messages
+        text = content_to_text(msg.content)
+        if text.strip():  # skip empty tool-call messages
+            temp_messages.append({"role": role, "content": text})
     st.session_state["message_history"] = temp_messages
     st.session_state["ingested_docs"].setdefault(str(selected_thread), {})
     st.rerun()
