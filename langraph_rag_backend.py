@@ -12,7 +12,7 @@ from langchain_community.tools import DuckDuckGoSearchRun
 from langchain_community.vectorstores import FAISS
 from langchain_core.messages import BaseMessage, SystemMessage
 from langchain_core.tools import tool
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import START, StateGraph
 from langgraph.graph.message import add_messages
@@ -24,8 +24,8 @@ load_dotenv()
 # -------------------
 # 1. LLM + embeddings
 # -------------------
-llm = ChatOpenAI(model="gpt-4o-mini")
-embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+llm = ChatGoogleGenerativeAI(model="gemini-3.5-flash-lite")
+embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-2")
 
 # -------------------
 # 2. PDF retriever store (per thread)
@@ -192,7 +192,7 @@ def rag_tool(query: str, thread_id: Optional[str] = None) -> dict:
     }
 
 
-tools = [search_tool, get_stock_price, calculator, rag_tool]
+tools = [search_tool, get_stock_price, calculator, rag_tool, get_weather]
 llm_with_tools = llm.bind_tools(tools)
 
 # -------------------
@@ -211,15 +211,16 @@ def chat_node(state: ChatState, config=None):
     if config and isinstance(config, dict):
         thread_id = config.get("configurable", {}).get("thread_id")
 
-    system_message = SystemMessage(
-        content=(
-            "You are a helpful assistant. For questions about the uploaded PDF, call "
-            "the `rag_tool` and include the thread_id "
-            f"`{thread_id}`. You can also use the web search, stock price, and "
-            "calculator tools when helpful. If no document is available, ask the user "
-            "to upload a PDF."
-        )
-    )
+    system_message = SystemMessage(content=(
+        "You are a helpful assistant with tools.\n"
+        "Rules:\n"
+        "- Questions about the uploaded PDF: ALWAYS call `rag_tool` "
+        f"with thread_id `{thread_id}`. Never answer from memory.\n"
+        "- Current prices, weather, news or anything time-sensitive: "
+        "ALWAYS use the matching tool or web search. Never guess.\n"
+        "- Any arithmetic: use `calculator`.\n"
+        "- If the tool returns nothing useful, say so instead of making up an answer."
+    ))
 
     messages = [system_message, *state["messages"]]
     response = llm_with_tools.invoke(messages, config=config)

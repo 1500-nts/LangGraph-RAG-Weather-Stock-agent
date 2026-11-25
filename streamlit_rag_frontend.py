@@ -126,11 +126,11 @@ if user_input:
                     tool_name = getattr(message_chunk, "name", "tool")
                     if status_holder["box"] is None:
                         status_holder["box"] = st.status(
-                            f"🔧 Using `{tool_name}` …", expanded=True
+                            f" Using `{tool_name}` …", expanded=True
                         )
                     else:
                         status_holder["box"].update(
-                            label=f"🔧 Using `{tool_name}` …",
+                            label=f" Using `{tool_name}` …",
                             state="running",
                             expanded=True,
                         )
